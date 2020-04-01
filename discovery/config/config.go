@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/consul"
 	"github.com/prometheus/prometheus/discovery/dns"
 	"github.com/prometheus/prometheus/discovery/ec2"
+	"github.com/prometheus/prometheus/discovery/etcd"
 	"github.com/prometheus/prometheus/discovery/file"
 	"github.com/prometheus/prometheus/discovery/gce"
 	"github.com/prometheus/prometheus/discovery/kubernetes"
@@ -58,6 +59,8 @@ type ServiceDiscoveryConfig struct {
 	AzureSDConfigs []*azure.SDConfig `yaml:"azure_sd_configs,omitempty"`
 	// List of Triton service discovery configurations.
 	TritonSDConfigs []*triton.SDConfig `yaml:"triton_sd_configs,omitempty"`
+	// List of Etcd service discovery configurations.
+	EtcdSDConfigs []*etcd.SDConfig `yaml:"etcd_sd_configs,omitempty"`
 }
 
 // Validate validates the ServiceDiscoveryConfig.
@@ -120,6 +123,11 @@ func (c *ServiceDiscoveryConfig) Validate() error {
 	for _, cfg := range c.StaticConfigs {
 		if cfg == nil {
 			return errors.New("empty or null section in static_configs")
+		}
+	}
+	for _, cfg := range c.EtcdSDConfigs {
+		if cfg == nil {
+			return errors.New("empty or null section in etcd_configs")
 		}
 	}
 	return nil

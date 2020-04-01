@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/consul"
 	"github.com/prometheus/prometheus/discovery/dns"
 	"github.com/prometheus/prometheus/discovery/ec2"
+	"github.com/prometheus/prometheus/discovery/etcd"
 	"github.com/prometheus/prometheus/discovery/file"
 	"github.com/prometheus/prometheus/discovery/gce"
 	"github.com/prometheus/prometheus/discovery/kubernetes"
@@ -407,6 +408,11 @@ func (m *Manager) registerProviders(cfg sd_config.ServiceDiscoveryConfig, setNam
 	for _, c := range cfg.AzureSDConfigs {
 		add(c, func() (Discoverer, error) {
 			return azure.NewDiscovery(c, log.With(m.logger, "discovery", "azure")), nil
+		})
+	}
+	for _, c := range cfg.EtcdSDConfigs {
+		add(c, func() (Discoverer, error) {
+			return etcd.NewDiscovery(c, log.With(m.logger, "discovery", "etcd")), nil
 		})
 	}
 	for _, c := range cfg.TritonSDConfigs {
