@@ -16,6 +16,7 @@ package config
 import (
 	"github.com/pkg/errors"
 
+	"github.com/prometheus/prometheus/discovery/api"
 	"github.com/prometheus/prometheus/discovery/azure"
 	"github.com/prometheus/prometheus/discovery/consul"
 	"github.com/prometheus/prometheus/discovery/dns"
@@ -34,6 +35,8 @@ import (
 type ServiceDiscoveryConfig struct {
 	// List of labeled target groups for this job.
 	StaticConfigs []*targetgroup.Group `yaml:"static_configs,omitempty"`
+	// List of api config
+	ApiSDConfigs []*api.SDConfig `yaml:"api_sd_configs,omitempty"`
 	// List of DNS service discovery configurations.
 	DNSSDConfigs []*dns.SDConfig `yaml:"dns_sd_configs,omitempty"`
 	// List of file service discovery configurations.

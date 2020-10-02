@@ -15,6 +15,7 @@ require (
 	github.com/armon/go-metrics v0.0.0-20190430140413-ec5e00d3c878 // indirect
 	github.com/aws/aws-sdk-go v1.22.4
 	github.com/cespare/xxhash v1.1.0
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
 	github.com/dgryski/go-sip13 v0.0.0-20190329191031-25c5027a8c7b
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/evanphx/json-patch v4.5.0+incompatible // indirect

@@ -27,6 +27,7 @@ import (
 	sd_config "github.com/prometheus/prometheus/discovery/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 
+	"github.com/prometheus/prometheus/discovery/api"
 	"github.com/prometheus/prometheus/discovery/azure"
 	"github.com/prometheus/prometheus/discovery/consul"
 	"github.com/prometheus/prometheus/discovery/dns"
@@ -349,6 +350,11 @@ func (m *Manager) registerProviders(cfg sd_config.ServiceDiscoveryConfig, setNam
 	for _, c := range cfg.DNSSDConfigs {
 		add(c, func() (Discoverer, error) {
 			return dns.NewDiscovery(*c, log.With(m.logger, "discovery", "dns")), nil
+		})
+	}
+	for _, c := range cfg.ApiSDConfigs {
+		add(c, func() (Discoverer, error) {
+			return api.NewDiscovery(*c, log.With(m.logger, "discovery", "api")), nil
 		})
 	}
 	for _, c := range cfg.FileSDConfigs {
