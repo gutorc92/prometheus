@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,6 +104,8 @@ type SDConfig struct {
 	TLSConfig config.TLSConfig `yaml:"tls_config,omitempty"`
 
 	ProxyURL config.URL `yaml:"proxy_url,omitempty"`
+
+	Labels model.LabelSet `yaml:"labels"`
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
@@ -129,6 +132,7 @@ type Discovery struct {
 	envTags         []string
 	tags            []string
 	server          string
+	labels          model.LabelSet
 }
 
 // NewDiscovery returns a new Discovery for the given config.
@@ -162,6 +166,7 @@ func NewDiscovery(conf SDConfig, logger log.Logger) *Discovery {
 		tags:            conf.ServiceTags,
 		token:           fmt.Sprintf("Token %s", conf.Token),
 		server:          conf.Server,
+		labels:          conf.Labels,
 	}
 	return cd
 }
@@ -178,59 +183,75 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 			ticker.Stop()
 			return
 		default:
+			tgroup := targetgroup.Group{
+				Source:  "cmdweb",
+				Labels:  model.LabelSet{},
+				Targets: make([]model.LabelSet, 0),
+			}
 			for _, env := range d.envTags {
 				u := createURL(d.server, env, d.tags)
-				level.Info(d.logger).Log("url", u.String())
-				req, err := http.NewRequest("GET", u.String(), nil)
-				req.Header.Set("Authorization", d.token)
+				dresp, err := d.requestTargets(ctx, u, 100)
 				if err != nil {
-					fmt.Print(err)
+					continue
 				}
-				resp, err := d.client.Do(req.WithContext(ctx))
-				if err != nil {
-					level.Error(d.logger).Log("msg", "Error retrieving api endpoint", "err", err)
-					fmt.Print(err)
-				}
-				if resp.StatusCode != http.StatusOK {
-					fmt.Println("Error on get response", resp.StatusCode)
-				}
-				defer resp.Body.Close()
-				dresp := new(DjangoResponse)
-				err = json.NewDecoder(resp.Body).Decode(dresp)
-				if err != nil {
-					level.Error(d.logger).Log("msg", "Error decoding response from api endpoint", "err", err)
-				}
-				fmt.Println("Quantidade de resultados", dresp.Count)
-				tgroup := targetgroup.Group{
-					Source: u.String(),
-					Labels: model.LabelSet{
-						envLabel: model.LabelValue(env),
-					},
-					Targets: make([]model.LabelSet, 0, dresp.Count),
+				if dresp.Count > len(dresp.Results) {
+					dresp, err = d.requestTargets(ctx, u, dresp.Count)
+					if err != nil {
+						continue
+					}
 				}
 				for _, s := range dresp.Results {
 					addr := fmt.Sprintf("%s.dispositivos.bb.com.br:%d", s.VirtualMachine.Name, s.Port)
 					labels := model.LabelSet{
+						envLabel:           model.LabelValue(env),
 						model.AddressLabel: model.LabelValue(addr),
 						componentName:      model.LabelValue(s.CustomFields.ComponentName),
 					}
+					labels = labels.Merge(d.labels)
 					tgroup.Targets = append(tgroup.Targets, labels)
 				}
-				select {
-				case <-ctx.Done():
-				case ch <- []*targetgroup.Group{&tgroup}:
-				}
 			}
-			fmt.Print("D")
+			select {
+			case <-ctx.Done():
+			case ch <- []*targetgroup.Group{&tgroup}:
+			}
 			<-ticker.C
 		}
 	}
+}
+
+func (d *Discovery) requestTargets(ctx context.Context, u *url.URL, limit int) (*DjangoResponse, error) {
+	q := u.Query()
+	s := strconv.Itoa(limit)
+	q.Set("limit", s)
+	u.RawQuery = q.Encode()
+	level.Info(d.logger).Log("api url", u.String())
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		level.Error(d.logger).Log("msg", "Error retrieving api endpoint", "err", err)
+		return nil, err
+	}
+	req.Header.Set("Authorization", d.token)
+	resp, err := d.client.Do(req.WithContext(ctx))
+	if err != nil {
+		level.Error(d.logger).Log("msg", "Error retrieving api endpoint", "err", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	dresp := new(DjangoResponse)
+	err = json.NewDecoder(resp.Body).Decode(dresp)
+	if err != nil {
+		level.Error(d.logger).Log("msg", "Error decoding response from api endpoint", "err", err)
+		return nil, err
+	}
+	return dresp, nil
 }
 
 func createURL(server string, env string, tags []string) *url.URL {
 	u, err := url.Parse(server)
 	if err != nil {
 		fmt.Print("Cannot parse url")
+		return nil
 	}
 	q := u.Query()
 	q.Add("tag", env)
