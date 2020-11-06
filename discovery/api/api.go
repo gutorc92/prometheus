@@ -82,6 +82,8 @@ type SDConfig struct {
 	Username string        `yaml:"username,omitempty"`
 	Password config.Secret `yaml:"password,omitempty"`
 
+	TargetHost string `yaml:"host,omitempty"`
+
 	// See https://www.consul.io/docs/internals/consensus.html#consistency-modes,
 	// stale reads are a lot cheaper and are a necessity if you have >5k targets.
 	AllowStale bool `yaml:"allow_stale"`
@@ -119,20 +121,20 @@ func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if strings.TrimSpace(c.Server) == "" {
 		return errors.New("api SD configuration requires a server address")
 	}
+	if c.TargetHost == "" {
+		c.TargetHost = "dispositivos.bb.com.br"
+	}
 	return nil
 }
 
 // Discovery retrieves target information from a Consul server
 // and updates them via watches.
 type Discovery struct {
+	conf            SDConfig
 	refreshInterval time.Duration
 	logger          log.Logger
 	client          *http.Client
 	token           string
-	envTags         []string
-	tags            []string
-	server          string
-	labels          model.LabelSet
 }
 
 // NewDiscovery returns a new Discovery for the given config.
@@ -159,14 +161,10 @@ func NewDiscovery(conf SDConfig, logger log.Logger) *Discovery {
 	}
 
 	cd := &Discovery{
+		conf:            conf,
 		client:          wrapper,
 		refreshInterval: time.Duration(conf.RefreshInterval),
 		logger:          logger,
-		envTags:         conf.EnvTags,
-		tags:            conf.ServiceTags,
-		token:           fmt.Sprintf("Token %s", conf.Token),
-		server:          conf.Server,
-		labels:          conf.Labels,
 	}
 	return cd
 }
@@ -188,8 +186,8 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 				Labels:  model.LabelSet{},
 				Targets: make([]model.LabelSet, 0),
 			}
-			for _, env := range d.envTags {
-				u := createURL(d.server, env, d.tags)
+			for _, env := range d.conf.EnvTags {
+				u := createURL(d.conf.Server, env, d.conf.ServiceTags)
 				dresp, err := d.requestTargets(ctx, u, 100)
 				if err != nil {
 					continue
@@ -201,13 +199,13 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 					}
 				}
 				for _, s := range dresp.Results {
-					addr := fmt.Sprintf("%s.dispositivos.bb.com.br:%d", s.VirtualMachine.Name, s.Port)
+					addr := fmt.Sprintf("%s.%s:%d", s.VirtualMachine.Name, d.conf.TargetHost, s.Port)
 					labels := model.LabelSet{
 						envLabel:           model.LabelValue(env),
 						model.AddressLabel: model.LabelValue(addr),
 						componentName:      model.LabelValue(s.CustomFields.ComponentName),
 					}
-					labels = labels.Merge(d.labels)
+					labels = labels.Merge(d.conf.Labels)
 					tgroup.Targets = append(tgroup.Targets, labels)
 				}
 			}
@@ -225,13 +223,13 @@ func (d *Discovery) requestTargets(ctx context.Context, u *url.URL, limit int) (
 	s := strconv.Itoa(limit)
 	q.Set("limit", s)
 	u.RawQuery = q.Encode()
-	level.Info(d.logger).Log("api url", u.String())
+	level.Info(d.logger).Log("apiUrl", u.String())
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		level.Error(d.logger).Log("msg", "Error retrieving api endpoint", "err", err)
 		return nil, err
 	}
-	req.Header.Set("Authorization", d.token)
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", d.conf.Token))
 	resp, err := d.client.Do(req.WithContext(ctx))
 	if err != nil {
 		level.Error(d.logger).Log("msg", "Error retrieving api endpoint", "err", err)
@@ -244,6 +242,7 @@ func (d *Discovery) requestTargets(ctx context.Context, u *url.URL, limit int) (
 		level.Error(d.logger).Log("msg", "Error decoding response from api endpoint", "err", err)
 		return nil, err
 	}
+	level.Debug(d.logger).Log("msg", "Targets found", "targets", fmt.Sprintf("%d", dresp.Count))
 	return dresp, nil
 }
 
