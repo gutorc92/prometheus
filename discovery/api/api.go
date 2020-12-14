@@ -76,11 +76,13 @@ func init() {
 
 // SDConfig is the configuration for Consul service discovery.
 type SDConfig struct {
-	Server   string        `yaml:"server,omitempty"`
-	Token    config.Secret `yaml:"token,omitempty"`
-	Scheme   string        `yaml:"scheme,omitempty"`
-	Username string        `yaml:"username,omitempty"`
-	Password config.Secret `yaml:"password,omitempty"`
+	Server     string        `yaml:"server,omitempty"`
+	Token      config.Secret `yaml:"token,omitempty"`
+	Scheme     string        `yaml:"scheme,omitempty"`
+	Username   string        `yaml:"username,omitempty"`
+	Password   config.Secret `yaml:"password,omitempty"`
+	Page       int           `yaml:"page,omitempty"`
+	MaxPerPage int           `yaml:"max_per_page,omitempty"`
 
 	TargetHost string `yaml:"host,omitempty"`
 
@@ -188,16 +190,26 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 			}
 			for _, env := range d.conf.EnvTags {
 				u := createURL(d.conf.Server, env, d.conf.ServiceTags)
-				dresp, err := d.requestTargets(ctx, u, 100)
-				if err != nil {
-					continue
-				}
-				if dresp.Count > len(dresp.Results) {
-					dresp, err = d.requestTargets(ctx, u, dresp.Count)
+				var dresp *DjangoResponse
+				var err error
+				if d.conf.Page != 0 && d.conf.MaxPerPage != 0 {
+					dresp, err = d.requestTargets(ctx, u, d.conf.MaxPerPage, (d.conf.Page-1)*d.conf.MaxPerPage)
 					if err != nil {
 						continue
 					}
+				} else {
+					dresp, err = d.requestTargets(ctx, u, 100, 0)
+					if err != nil {
+						continue
+					}
+					if dresp.Count > len(dresp.Results) {
+						dresp, err = d.requestTargets(ctx, u, dresp.Count, 0)
+						if err != nil {
+							continue
+						}
+					}
 				}
+
 				for _, s := range dresp.Results {
 					addr := fmt.Sprintf("%s.%s:%d", s.VirtualMachine.Name, d.conf.TargetHost, s.Port)
 					labels := model.LabelSet{
@@ -218,10 +230,14 @@ func (d *Discovery) Run(ctx context.Context, ch chan<- []*targetgroup.Group) {
 	}
 }
 
-func (d *Discovery) requestTargets(ctx context.Context, u *url.URL, limit int) (*DjangoResponse, error) {
+func (d *Discovery) requestTargets(ctx context.Context, u *url.URL, limit int, offset int) (*DjangoResponse, error) {
 	q := u.Query()
 	s := strconv.Itoa(limit)
 	q.Set("limit", s)
+	if offset != 0 {
+		s = strconv.Itoa(offset)
+		q.Set("offset", s)
+	}
 	u.RawQuery = q.Encode()
 	level.Info(d.logger).Log("apiUrl", u.String())
 	req, err := http.NewRequest("GET", u.String(), nil)
